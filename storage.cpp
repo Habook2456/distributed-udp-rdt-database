@@ -13,8 +13,6 @@ UDPdatabase database; // base de datos - abstraccion de grafo
 void processServerResponse(int sockfd, sockaddr_in serverAddr)
 {
     std::string rdtMessage = rdtStorage.receiveACKmessage(sockfd, serverAddr);
-    // std::cout << "ACK Message from Storage: " << rdtMessage << std::endl;
-
 
     if (rdtMessage[0] == 'A')
     {
@@ -24,6 +22,7 @@ void processServerResponse(int sockfd, sockaddr_in serverAddr)
     else if (rdtMessage[0] == 'N')
     {
         // TO DO: logica de reenvio en caso de NAK
+        std::cout << "NAK from Server" << std::endl;
     }
     else
     {
@@ -68,12 +67,12 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
         // enviar numero de valores al servidor principal
         /*
         message format:
-        R               -> type message (1 byte)
+        R               -> type message (1 by   te)
         0000            -> size of vector data (4 bytes)
         */
         std::string message = "R" + complete_digits(data.size(), 4);
         std::string rdtMessage = rdtStorage.createRDTmessage(message);
-
+        
         rdtStorage.sendRDTmessage(sockfd, rdtMessage, mainServAddr);
         processServerResponse(sockfd, mainServAddr);
 
@@ -87,7 +86,7 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
             */
             string message = complete_digits(data[i].size(), 4) + data[i];
             std::string rdtMessage = rdtStorage.createRDTmessage(message);
-
+            
             // enviar al servidor principal
             rdtStorage.sendRDTmessage(sockfd, rdtMessage, mainServAddr);
             processServerResponse(sockfd, mainServAddr);

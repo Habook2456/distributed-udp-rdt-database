@@ -17,14 +17,14 @@ RDT rdtClient;
 void processServerResponse(int sockfd, sockaddr_in serverAddr)
 {
     std::string rdtMessage = rdtClient.receiveACKmessage(sockfd, serverAddr);
-    std::cout << "processServerResponse -> " << rdtMessage << std::endl;
-    std::string messageType = rdtMessage.substr(0, 1);
+    std::cout << "RESPUESTA SERVIDOR PRINCIPAL -> " << rdtMessage << std::endl;
+    std::string messageType = rdtMessage.substr(0, 3);
 
-    if (messageType == "A")
+    if (messageType == "ACK")
     {
         std::cout << "Received ACK from server." << std::endl;
     }
-    else if (messageType == "N")
+    else if (messageType == "NAK")
     {
         std::cout << "Received NAK from server." << std::endl;
         // TO DO: logica de reenvio en caso de NAK
@@ -52,6 +52,7 @@ bool checkServerMessage(const std::string &receivedMessage, int sockfd, const so
     else
     {
         // TO DO: enviar NAK al servidor principal
+        rdtClient.sendNAK(sockfd, mainServAddr);
         return false;
     }
 }
@@ -67,13 +68,29 @@ void createRegister(int sockfd, sockaddr_in serverAddr)
     std::cout << "Enter value: ";
     std::cin >> value;
 
+    /*
+    CREATE MESSAGE FORMAT
+
+    C       -> type message    (1 byte)
+    0000    -> size key        (4 bytes)
+    key     -> string key      (size key bytes)
+    0000    -> size value      (4 bytes)
+    value   -> string value    (size value bytes)
+    */
+    // capa de aplicacion
     std::string message = 'C' +
                           complete_digits(key.size(), 4) +
                           key +
                           complete_digits(value.size(), 4) +
                           value;
 
+    // crear mensaje RDT - capa de transporte
     std::string rdtMessage = rdtClient.createRDTmessage(message);
+
+    // enviar mensaje RDT
+    rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
+
+    // recibir respuesta del servidor principal (ACK o NAK)
     processServerResponse(sockfd, serverAddr);
 }
 
@@ -90,6 +107,17 @@ void readRegister(int sockfd, sockaddr_in serverAddr)
     std::cout << "Enter depth search: ";
     std::cin >> depthSearch;
 
+    /*
+    READ MESSAGE FORMAT
+    R              -> type message          (1 byte)
+    0000           -> size key              (4 bytes)
+    key            -> string key            (size key bytes)
+    0000           -> size depthSearch      (4 bytes)
+    depthSearch    -> string depthSearch    (size depthSearch bytes)
+    1 -> no recursivo 
+    mayor a 1 -> recursivo
+    */
+
     // crear mensaje para solicitar datos al servidor principal
     std::string message = 'R' +
                           complete_digits(key.size(), 4) +
@@ -99,9 +127,13 @@ void readRegister(int sockfd, sockaddr_in serverAddr)
 
     // crear mensaje rdt
     std::string rdtMessage = rdtClient.createRDTmessage(message);
+
     // enviar mensaje rdt
     rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
-    // recibir respuesta rdt del servidor principal
+
+    // recibir respuesta rdt del servidor principal (ACK o NAK)
+    processServerResponse(sockfd, serverAddr);
+    
     // primer mensaje recibido: tamaño de los datos a recibir
     std::string rdtSizeDataMessage = rdtClient.receiveRDTmessage(sockfd, serverAddr);
     int sizeData = 0;
@@ -119,7 +151,6 @@ void readRegister(int sockfd, sockaddr_in serverAddr)
         return;
     }
 
-    std::cout << "registros para leer : " << sizeData << std::endl;
 
     std::cout << "---------REGISTROS---------" << std::endl;
     // RECIBIR REGISTROS DEL SERVIDOR PRINCIPAL
@@ -142,6 +173,9 @@ void readRegister(int sockfd, sockaddr_in serverAddr)
             std::cout << "Error al recibir los datos" << std::endl;
         }
     }
+
+    std::cout << "Numero de Registros: " << sizeData << std::endl;
+
 }
 
 // actualizar registro (key, oldValue, newValue)
@@ -159,6 +193,17 @@ void updateRegister(int sockfd, sockaddr_in serverAddr)
     std::cin >> oldValue;
     std::cout << "Enter new value: ";
     std::cin >> newValue;
+    
+    /*
+    UPDATE MESSAGE FORMAT
+    U              -> type message    (1 byte)
+    0000           -> size key        (4 bytes)
+    key            -> string key      (size key bytes)
+    0000           -> size oldValue   (4 bytes)
+    oldValue       -> string oldValue (size oldValue bytes)
+    0000           -> size newValue   (4 bytes)
+    newValue       -> string newValue (size newValue bytes)
+    */
 
     // crear mensaje para modificar datos al servidor principal
     std::string message = 'U' +
@@ -168,11 +213,14 @@ void updateRegister(int sockfd, sockaddr_in serverAddr)
                           oldValue +
                           complete_digits(newValue.size(), 4) +
                           newValue;
+
     // crear mensaje rdt
     std::string rdtMessage = rdtClient.createRDTmessage(message);
+
     // enviar mensaje rdt
     rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
-    // recibir respuesta del servidor principal
+
+    // recibir respuesta del servidor principal (ACK o NAK)
     processServerResponse(sockfd, serverAddr);
 }
 
@@ -181,12 +229,22 @@ void deleteRegister(int sockfd, sockaddr_in serverAddr)
 {
     std::string key;
     std::string value;
+
     // get data
     std::cout << "----- Delete Register -----" << std::endl;
     std::cout << "Enter key: ";
     std::cin >> key;
     std::cout << "Enter value: ";
     std::cin >> value;
+
+    /*
+    DELETE MESSAGE FORMAT
+    D              -> type message    (1 byte)
+    0000           -> size key        (4 bytes)
+    key            -> string key      (size key bytes)
+    0000           -> size value      (4 bytes)
+    value          -> string value    (size value bytes)
+    */
 
     // crear mensaje para eliminar datos al servidor principal
     std::string message = 'D' +
@@ -197,9 +255,11 @@ void deleteRegister(int sockfd, sockaddr_in serverAddr)
 
     // crear mensaje rdt
     std::string rdtMessage = rdtClient.createRDTmessage(message);
+
     // enviar mensaje rdt
     rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
-    // recibir respuesta del servidor principal
+
+    // recibir respuesta del servidor principal (ACK o NAK)
     processServerResponse(sockfd, serverAddr);
 }
 

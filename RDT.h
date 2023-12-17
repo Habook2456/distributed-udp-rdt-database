@@ -18,7 +18,7 @@ public:
 
     // constructor
     RDT(uint32_t seqNum) : accSeq_num(seqNum) {}
-    RDT() {};
+    RDT(){};
 
     // acumular numero de secuencia
     uint32_t accumulate(uint32_t messageSize)
@@ -157,16 +157,26 @@ public:
     // enviar ACK
     void sendACK(int sockfd, const sockaddr_in &destAddr)
     {
+        /*
+        ACK             -> acknowledgement message              (3b)
+        0000000000      -> sequence number                      (10b)
+        */
         std::string ackMessage = "ACK" + complete_digits(accSeq_num, 10);
         sendRDTmessage(sockfd, ackMessage, destAddr);
     }
 
     // enviar NAK
-    void sendNACK(int sockfd, const sockaddr_in &destAddr)
+    void sendNAK(int sockfd, const sockaddr_in &destAddr)
     {
+        /*
+        NAK             -> acknowledgement message              (3b)
+        0000000000      -> sequence number                      (10b)
+        */
         std::string nackMessage = "NAK" + complete_digits(accSeq_num, 10);
         sendRDTmessage(sockfd, nackMessage, destAddr);
     }
+
+
 };
 
 #endif
