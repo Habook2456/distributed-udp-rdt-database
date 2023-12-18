@@ -12,30 +12,47 @@
 const int PORT = 12345;
 const int BUFFER_SIZE = 1024;
 const int MAX_ENTRIES = 3;
+const int TIMEOUT = 5;
 RDT rdtClient;
 
 void retransmition(std::string message, int sockfd, sockaddr_in serverAddr)
 {
     int intentos = 0;
-    do{
+    do
+    {
         std::cout << "Reenviando -> " << message << "\n";
         rdtClient.sendRDTmessage(sockfd, message, serverAddr);
 
+        struct timeval tv;
+        tv.tv_sec = TIMEOUT; // 2 segundos de timeout
+        tv.tv_usec = 0;
+
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+
         std::string response = rdtClient.receiveACKmessage(sockfd, serverAddr);
 
-        if(response.substr(0,3) == "ACK"){
+        if (response.substr(0, 3) == "ACK")
+        {
             std::cout << "ACK recibido. Datos entregados correctamente al servidor." << std::endl;
             break;
-        } else if (response.substr(0,3) == "NAK"){
+        }
+        else if (response.substr(0, 3) == "NAK")
+        {
             std::cout << "NAK recibido. Reintentando..." << std::endl;
             intentos++;
-        } else{
+        } else if(response.substr(0,3) == ""){
+            std::cout << "Timeout. No se recibió respuesta del servidor principal." << std::endl;
+            intentos++;
+        }
+        else
+        {
             std::cout << "Error en el mensaje recibido" << std::endl;
         }
 
     } while (intentos < MAX_ENTRIES);
 
-    if(intentos == MAX_ENTRIES){
+    if (intentos == MAX_ENTRIES)
+    {
         std::cout << "Número máximo de reintentos alcanzado. No se pudo entregar el mensaje al servidor." << std::endl;
     }
 }
@@ -43,8 +60,15 @@ void retransmition(std::string message, int sockfd, sockaddr_in serverAddr)
 // revisar si respuesta del servidor principal es ACK o NAK
 void processServerResponse(int sockfd, sockaddr_in serverAddr, std::string message)
 {
+    /*
+    struct timeval tv;
+    tv.tv_sec = TIMEOUT; // 2 segundos de timeout
+    tv.tv_usec = 0;
+
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv)); */
+
     std::string rdtMessage = rdtClient.receiveACKmessage(sockfd, serverAddr);
-    std::cout << "RESPUESTA SERVIDOR PRINCIPAL -> " << rdtMessage << std::endl;
+
     std::string messageType = rdtMessage.substr(0, 3);
 
     if (messageType == "ACK")
@@ -54,6 +78,11 @@ void processServerResponse(int sockfd, sockaddr_in serverAddr, std::string messa
     else if (messageType == "NAK")
     {
         std::cout << "Received NAK from server." << std::endl;
+        retransmition(message, sockfd, serverAddr);
+    }
+    else if (messageType == "")
+    {
+        std::cout << "Timeout. No se recibió respuesta del servidor principal." << std::endl;
         retransmition(message, sockfd, serverAddr);
     }
     else
@@ -70,9 +99,8 @@ bool checkServerMessage(const std::string &receivedMessage, int sockfd, const so
     // extraccion del numero de secuencia del rdt cliente
     uint32_t RDT_seq_num = rdtClient.getSeqNum();
 
-    //std::cout << "Message Seq Num: " << message_seq_num << std::endl;
-    //std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
-
+    // std::cout << "Message Seq Num: " << message_seq_num << std::endl;
+    // std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
 
     // comparar CHECKSUM y numero de secuencia
     if (rdtClient.checkRDTmessage(receivedMessage) && (message_seq_num > RDT_seq_num))

@@ -9,29 +9,48 @@
 RDT rdtStorage(1000);
 UDPdatabase database; // base de datos - abstraccion de grafo
 const int MAX_ENTRIES = 3;
+const int TIMEOUT = 5;
 
 void retransmition(std::string message, int sockfd, sockaddr_in serverAddr)
 {
     int intentos = 0;
-    do{
+    do
+    {
         std::cout << "Reenviando -> " << message << "\n";
         rdtStorage.sendRDTmessage(sockfd, message, serverAddr);
 
+        struct timeval tv;
+        tv.tv_sec = TIMEOUT; // 2 segundos de timeout
+        tv.tv_usec = 0;
+
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+
         std::string response = rdtStorage.receiveACKmessage(sockfd, serverAddr);
 
-        if(response.substr(0,3) == "ACK"){
+        if (response.substr(0, 3) == "ACK")
+        {
             std::cout << "ACK recibido. Datos entregados correctamente al servidor." << std::endl;
             break;
-        } else if (response.substr(0,3) == "NAK"){
+        }
+        else if (response.substr(0, 3) == "NAK")
+        {
             std::cout << "NAK recibido. Reintentando..." << std::endl;
             intentos++;
-        } else{
+        }
+        else if (response.substr(0, 3) == "")
+        {
+            std::cout << "Timeout. Reintentando..." << std::endl;
+            intentos++;
+        }
+        else
+        {
             std::cout << "Error en el mensaje recibido" << std::endl;
         }
 
     } while (intentos < MAX_ENTRIES);
 
-    if(intentos == MAX_ENTRIES){
+    if (intentos == MAX_ENTRIES)
+    {
         std::cout << "Número máximo de reintentos alcanzado. No se pudo entregar el mensaje al servidor." << std::endl;
     }
 }
@@ -39,17 +58,29 @@ void retransmition(std::string message, int sockfd, sockaddr_in serverAddr)
 // procesar mensaje del servidor principal
 void processServerResponse(int sockfd, sockaddr_in serverAddr, std::string message)
 {
-    std::string rdtMessage = rdtStorage.receiveACKmessage(sockfd, serverAddr);
+    /*
+    struct timeval tv;
+    tv.tv_sec = TIMEOUT; // 2 segundos de timeout
+    tv.tv_usec = 0;
 
-    if (rdtMessage[0] == 'A')
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));*/
+
+    std::string rdtMessage = rdtStorage.receiveACKmessage(sockfd, serverAddr);
+    std::string messageType = rdtMessage.substr(0, 3);
+
+    if (messageType == "ACK")
     {
-        std::cout << "ACK from Server" << std::endl;
+        //std::cout << "ACK from Server" << std::endl;
         // rdtStorage.sendACK(sockfd, serverAddr);
     }
-    else if (rdtMessage[0] == 'N')
+    else if (messageType == "NAK")
     {
         // TO DO: logica de reenvio en caso de NAK
         std::cout << "NAK from Server" << std::endl;
+        retransmition(message, sockfd, serverAddr);
+    } 
+    else if(messageType == ""){
+        std::cout << "Timeout from Server" << std::endl;
         retransmition(message, sockfd, serverAddr);
     }
     else
@@ -156,9 +187,9 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
     }
     case 'K': // keep alive command
     {
-        std::cout << "KEEP ALIVE" << std::endl;
+        //std::cout << "KEEP ALIVE" << std::endl;
         break;
-    }   
+    }
     default:
         break;
     }
@@ -168,10 +199,7 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
 bool checkServerMessage(const std::string &receivedMessage, int sockfd, const sockaddr_in &mainServAddr)
 {
     uint32_t message_seq_num = rdtStorage.extractSeqNum(receivedMessage);
-    uint32_t RDT_seq_num = rdtStorage.getSeqNum();
-
-    std::cout << "Message Seq Num: " << message_seq_num << std::endl;
-    std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
+    uint32_t RDT_seq_num = rdtStorage.getSeqNum();  
 
     if (rdtStorage.checkRDTmessage(receivedMessage) && (message_seq_num > RDT_seq_num))
     {
@@ -196,6 +224,11 @@ void processServerMessage(int sockfd, const sockaddr_in &mainServAddr)
     {
         // recibir mensaje
         std::string RDTmessage = rdtStorage.receiveRDTmessage(sockfd, mainServAddr);
+
+        if(RDTmessage.empty()){
+            continue;
+        }
+
         // verificar mensaje
         if (checkServerMessage(RDTmessage, sockfd, mainServAddr))
         {

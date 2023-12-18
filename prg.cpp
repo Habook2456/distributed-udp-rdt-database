@@ -11,61 +11,108 @@
 
 const int PORT = 12345;
 const int BUFFER_SIZE = 1024;
+const int MAX_ENTRIES = 3;
+const int TIMEOUT = 5;
 RDT rdtClient;
 
-void readMessage(int sockfd)
+void retransmition(std::string message, int sockfd, sockaddr_in serverAddr)
 {
-    sockaddr_in senderAddr;
-    socklen_t senderAddrLen = sizeof(senderAddr);
-    char buffer[BUFFER_SIZE];
-
-    while (true)
+    int intentos = 0;
+    do
     {
-        // Recibir mensajes en un bucle infinito
-        ssize_t bytesRead = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&senderAddr, &senderAddrLen);
+        std::cout << "Reenviando -> " << message << "\n";
+        rdtClient.sendRDTmessage(sockfd, message, serverAddr);
 
-        if (bytesRead == -1)
+        struct timeval tv;
+        tv.tv_sec = TIMEOUT; // 2 segundos de timeout
+        tv.tv_usec = 0;
+
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+
+        std::string response = rdtClient.receiveACKmessage(sockfd, serverAddr);
+
+        if (response.substr(0, 3) == "ACK")
         {
-            std::cerr << "Error al recibir el mensaje" << std::endl;
-            // Puedes agregar lógica adicional aquí según tus necesidades
+            std::cout << "ACK recibido. Datos entregados correctamente al servidor." << std::endl;
+            break;
+        }
+        else if (response.substr(0, 3) == "NAK")
+        {
+            std::cout << "NAK recibido. Reintentando..." << std::endl;
+            intentos++;
+        } else if(response.substr(0,3) == ""){
+            std::cout << "Timeout. No se recibió respuesta del servidor principal." << std::endl;
+            intentos++;
         }
         else
         {
-            buffer[bytesRead] = '\0';
-            std::string receivedMessage(buffer);
-
-            std::cout << "Mensaje recibido: " << receivedMessage << std::endl;
+            std::cout << "Error en el mensaje recibido" << std::endl;
         }
+
+    } while (intentos < MAX_ENTRIES);
+
+    if (intentos == MAX_ENTRIES)
+    {
+        std::cout << "Número máximo de reintentos alcanzado. No se pudo entregar el mensaje al servidor." << std::endl;
     }
 }
 
-void processServerResponse(int sockfd, sockaddr_in serverAddr)
+// revisar si respuesta del servidor principal es ACK o NAK
+void processServerResponse(int sockfd, sockaddr_in serverAddr, std::string message)
 {
-    // Esperar y procesar la respuesta del servidor
+
+    struct timeval tv;
+    tv.tv_sec = TIMEOUT; // 2 segundos de timeout
+    tv.tv_usec = 0;
+
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
+
     std::string rdtMessage = rdtClient.receiveACKmessage(sockfd, serverAddr);
 
-    std::string messageType = rdtMessage.substr(0, 1);
+    std::string messageType = rdtMessage.substr(0, 3);
 
-    if (messageType == "A")
+    if (messageType == "ACK")
     {
-        // El servidor envió un ACK
         std::cout << "Received ACK from server." << std::endl;
-
-        // Continuar con la siguiente operación si es necesario
     }
-    else if (messageType == "N")
+    else if (messageType == "NAK")
     {
-        // El servidor envió un NACK
-        std::cout << "Received NACK from server." << std::endl;
-
-        // Tomar medidas correctivas según sea necesario, como retransmitir el mensaje
-        // (Puedes implementar la lógica de retransmisión aquí)
+        std::cout << "Received NAK from server." << std::endl;
+        retransmition(message, sockfd, serverAddr);
+    }
+    else if (messageType == "")
+    {
+        std::cout << "Timeout. No se recibió respuesta del servidor principal." << std::endl;
+        retransmition(message, sockfd, serverAddr);
     }
     else
     {
-        // Tipo de mensaje no reconocido
         std::cerr << "Received unrecognized message type from server." << std::endl;
-        // Puedes manejar esto según tus requisitos, como notificar al usuario o abortar la operación.
+    }
+}
+
+// revisar mensaje recibido del servidor
+bool checkServerMessage(const std::string &receivedMessage, int sockfd, const sockaddr_in &mainServAddr)
+{
+    // extraccion del numero de secuencia del mensaje recibido
+    uint32_t message_seq_num = rdtClient.extractSeqNum(receivedMessage);
+    // extraccion del numero de secuencia del rdt cliente
+    uint32_t RDT_seq_num = rdtClient.getSeqNum();
+
+    // std::cout << "Message Seq Num: " << message_seq_num << std::endl;
+    // std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
+
+    // comparar CHECKSUM y numero de secuencia
+    if (rdtClient.checkRDTmessage(receivedMessage) && (message_seq_num > RDT_seq_num))
+    {
+        rdtClient.sendACK(sockfd, mainServAddr);
+        return true;
+    }
+    else
+    {
+        // TO DO: enviar NAK al servidor principal
+        rdtClient.sendNAK(sockfd, mainServAddr);
+        return false;
     }
 }
 
@@ -84,28 +131,83 @@ void createRegister(int sockfd, sockaddr_in serverAddr, std::string key, std::st
 
     rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
 
-    processServerResponse(sockfd, serverAddr);
+    processServerResponse(sockfd, serverAddr, rdtMessage);
 }
 
-void readRegister(int sockfd, sockaddr_in serverAddr)
+void readRegister(int sockfd, sockaddr_in serverAddr, std::string key, std::string depthSearch)
 {
-    //TO DO
+
+    /*
+    READ MESSAGE FORMAT
+    R              -> type message          (1 byte)
+    0000           -> size key              (4 bytes)
+    key            -> string key            (size key bytes)
+    0000           -> size depthSearch      (4 bytes)
+    depthSearch    -> string depthSearch    (size depthSearch bytes)
+    1 -> no recursivo
+    mayor a 1 -> recursivo
+    */
+
+    // crear mensaje para solicitar datos al servidor principal
+    std::string message = 'R' +
+                          complete_digits(key.size(), 4) +
+                          key +
+                          complete_digits(depthSearch.size(), 4) +
+                          depthSearch;
+
+    // crear mensaje rdt
+    std::string rdtMessage = rdtClient.createRDTmessage(message);
+
+    // enviar mensaje rdt
+    rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
+
+    // recibir respuesta rdt del servidor principal (ACK o NAK)
+    processServerResponse(sockfd, serverAddr, rdtMessage);
+
+    // primer mensaje recibido: tamaño de los datos a recibir
+    std::string rdtSizeDataMessage = rdtClient.receiveRDTmessage(sockfd, serverAddr);
+    int sizeData = 0;
+    // verificar si el mensaje recibido es correcto
+    if (checkServerMessage(rdtSizeDataMessage, sockfd, serverAddr))
+    {
+        // extraer el tamaño de los datos a recibir e instanciar la variable sizeData
+        std::string sizeDataStr = rdtClient.decodeRDTmessage(rdtSizeDataMessage);
+        sizeData = std::stoi(sizeDataStr.substr(1, 4));
+    }
+    else
+    {
+        // si el mensaje no es correcto, mostrar error y terminar ejecucion READ
+        std::cout << "Error al recibir el tamaño de los datos" << std::endl;
+        return;
+    }
+
+    std::cout << "---------REGISTROS---------" << std::endl;
+    // RECIBIR REGISTROS DEL SERVIDOR PRINCIPAL
+    for (int i = 0; i < sizeData; i++)
+    {
+        std::string rdtDataMessage = rdtClient.receiveRDTmessage(sockfd, serverAddr);
+
+        if (checkServerMessage(rdtDataMessage, sockfd, serverAddr))
+        {
+            std::string data = rdtClient.decodeRDTmessage(rdtDataMessage);
+            std::string key;
+            std::string value;
+
+            parseCreateMessage(data, key, value);
+
+            std::cout << key << " - " << value << std::endl;
+        }
+        else
+        {
+            std::cout << "Error al recibir los datos" << std::endl;
+        }
+    }
+
+    std::cout << "Numero de Registros: " << sizeData << std::endl;
 }
 
-void updateRegister(int sockfd, sockaddr_in serverAddr)
+void updateRegister(int sockfd, sockaddr_in serverAddr, std::string key, std::string oldValue, std::string newValue)
 {
-    
-    std::string key;
-    std::string oldValue;
-    std::string newValue;
-
-    std::cout << "----- Update Register -----" << std::endl;
-    std::cout << "Enter key: ";
-    std::cin >> key;
-    std::cout << "Enter old value: ";
-    std::cin >> oldValue;
-    std::cout << "Enter new value: ";
-    std::cin >> newValue;
 
     std::string message = 'U' +
                           complete_digits(key.size(), 4) +
@@ -118,11 +220,36 @@ void updateRegister(int sockfd, sockaddr_in serverAddr)
     std::string rdtMessage = rdtClient.createRDTmessage(message);
 
     rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
+
+    processServerResponse(sockfd, serverAddr, rdtMessage);
 }
 
-void deleteRegister(int sockfd, sockaddr_in serverAddr)
+void deleteRegister(int sockfd, sockaddr_in serverAddr, std::string key, std::string value)
 {
-    // TO DO
+    /*
+    DELETE MESSAGE FORMAT
+    D              -> type message    (1 byte)
+    0000           -> size key        (4 bytes)
+    key            -> string key      (size key bytes)
+    0000           -> size value      (4 bytes)
+    value          -> string value    (size value bytes)
+    */
+
+    // crear mensaje para eliminar datos al servidor principal
+    std::string message = 'D' +
+                          complete_digits(key.size(), 4) +
+                          key +
+                          complete_digits(value.size(), 4) +
+                          value;
+
+    // crear mensaje rdt
+    std::string rdtMessage = rdtClient.createRDTmessage(message);
+
+    // enviar mensaje rdt
+    rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
+
+    // recibir respuesta del servidor principal (ACK o NAK)
+    processServerResponse(sockfd, serverAddr, rdtMessage);
 }
 
 int main(int argc, char *argv[])
@@ -153,13 +280,13 @@ int main(int argc, char *argv[])
         createRegister(sockfd, serverAddr, argv[2], argv[3]);
         break;
     case 'R':
-        readRegister(sockfd, serverAddr);
+        readRegister(sockfd, serverAddr, argv[2], argv[3]);
         break;
     case 'U':
-        updateRegister(sockfd, serverAddr);
+        updateRegister(sockfd, serverAddr, argv[2], argv[3], argv[4]);
         break;
     case 'D':
-        deleteRegister(sockfd, serverAddr);
+        deleteRegister(sockfd, serverAddr, argv[2], argv[3]);
         break;
     case 'E':
         std::cout << "Saliendo del programa." << std::endl;
