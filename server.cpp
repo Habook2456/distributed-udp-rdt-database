@@ -43,6 +43,14 @@ int hashFunction(char c)
     return (int)c % 4;
 }
 
+void printStorageServers()
+{
+    for (int i = 0; i < storageServSockets.size(); i++)
+    {
+        std::cout << "Storage " << i << " - " << storageServSockets[i].direccion.sin_addr.s_addr << std::endl;
+    }
+}
+
 // procesar respuesta del servidor de almacenamiento (solo en funciones CREATE, UPDATE, DELETE)
 void processStorageResponse(int sockfd, sockaddr_in serverAddr)
 {
@@ -111,90 +119,41 @@ void sendAndProcessRDTMessage(int index, const std::string &message)
     rdtStorage.sendRDTmessage(storageServSockets[index].socket, message, storageServSockets[index].direccion);
     processStorageResponse(storageServSockets[index].socket, storageServSockets[index].direccion);
 }
-/*
-// FUNCION DE LECTURA RECURSIVA
-std::vector<std::pair<std::string, std::string>> readData(std::string key, int depthSearch, std::unordered_set<std::string> &visitedKeys)
+
+bool isServerAvailable(int index)
 {
-    // RESULTADO
-    std::vector<std::pair<std::string, std::string>> result;
 
-    // CASO BASE
-    if (depthSearch <= 0 || visitedKeys.find(key) != visitedKeys.end())
-    {
-        return result;
-    }
+    std::cout << "isServerAvailable? -> " << index << std::endl;
 
-    // GUARDAR CLAVE VISITADA
-    visitedKeys.insert(key);
-    std::cout << "CLAVE VISITADA -> " << key << std::endl;
+    // enviar K
+    std::string message = rdtStorage.createRDTmessage("K");
+    rdtStorage.sendRDTmessage(storageServSockets[index].socket, message, storageServSockets[index].direccion);
 
-    // CALCULAR INDICE DE SERVIDOR DE ALMACENAMIENTO (hash function)
-    // se almacena en dos servidores de almacenamiento (index y nextIndex) (nextIndex = index + 1 || 0 if index = 3)
-    int index = hashFunction(key[0]);
-    int nextIndex = (index == STORAGE_INDEX_LIMIT) ? 0 : index + 1;
+    struct timeval tv;
+    tv.tv_sec = 2; // 2 segundos de timeout 
+    tv.tv_usec = 0; 
+    setsockopt(storageServSockets[index].socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
 
-    // CREAR MENSAJE PARA PEDIR DATOS AL SERVIDOR DE ALMACENAMIENTO
-    std::string readMessage = rdtStorage.createRDTmessage("R" + complete_digits(key.size(), 4) + key);
-    //std::cout << "pedir datos: " << readMessage << std::endl;
-    //std::cout << "A STORAGE: " << index << std::endl;
-    // sendAndProcessRDTMessage(index, readMessage);
-
-
-    // ENVIAR MENSAJE PARA PEDIR DATOS AL SERVIDOR DE ALMACENAMIENTO -> INDEX
-    sendAndProcessRDTMessage(index, readMessage);
-
-    // RECIBIR NUMERO DE DATOS A RECIBIR - FORMATO RDT MESSAGE
-    std::string rdtMessage = rdtStorage.receiveRDTmessage(storageServSockets[index].socket, storageServSockets[index].direccion);
-    int numData = 0;
-
-    // MENSAJE CORRECTO?
-    if (checkStorageMessage(rdtMessage, storageServSockets[index].socket, storageServSockets[index].direccion))
-    {
-        // DECODIFICAR MENSAJE
-        std::string message = rdtStorage.decodeRDTmessage(rdtMessage);
-
-        // OBTENER NUMERO DE DATOS
-        numData = std::stoi(message.substr(1, 4));
-    }
-    else
-    {
-        std::cout << "Incorrect Message" << std::endl;
-    }
-
-    // RECIBIR DATOS DEL SERVIDOR DE ALMACENAMIENTO - FORMATO RDT MESSAGE
-    for (int i = 0; i < numData; i++)
-    {
-        std::string rdtMessage = rdtStorage.receiveRDTmessage(storageServSockets[index].socket, storageServSockets[index].direccion);
-        // MENSAJE CORRECTO?
-        if (checkStorageMessage(rdtMessage, storageServSockets[index].socket, storageServSockets[index].direccion))
-        {
-            //std::cout << "message de storage: " << rdtMessage << std::endl;
-            // DECODIFICAR MENSAJE
-            std::string message = rdtStorage.decodeRDTmessage(rdtMessage);
-            std::string value;
-            // OBTENER VALOR DEL MENSAJE
-            parseValuesMessage(message, value);
-
-            // INSERTAR EN EL VECTOR DE RESULTADO
-            result.push_back(std::make_pair(key, value));
-
-            // OBTENER VECTOR RESULTADO DE LA LLAMADA RECURSIVA
-            auto recursiveResult = readData(value, depthSearch - 1, visitedKeys);
-
-            // CONCATENAR VECTORES
-            result.insert(result.end(), recursiveResult.begin(), recursiveResult.end());
-
-        }
-        else
-        {
-
-            std::cout << "Incorrect Message" << std::endl;
-        }
-    }
-
-    return result;
+    // recibir ACK
+    std::string rdtMessage = rdtStorage.receiveACKmessage(storageServSockets[index].socket, storageServSockets[index].direccion);
+    std::string messageType = rdtMessage.substr(0, 3);
+    return messageType == "ACK";
 }
-*/
+
+// keep alive function
+void keepAlive(int &index, int &nextIndex)
+{
+    while (!isServerAvailable(index)) // busco index
+    {
+        index = nextIndex;
+        nextIndex = (index == STORAGE_INDEX_LIMIT) ? 0 : index + 1;
+    }
+
+    while(!isServerAvailable(nextIndex)) // busco el index + 1
+    {
+        nextIndex = (nextIndex == STORAGE_INDEX_LIMIT) ? 0 : nextIndex + 1;
+    }
+}
 
 // FUNCION DE LECTURA RECURSIVA
 std::vector<std::pair<std::string, std::string>> readData(std::string key, int depthSearch, std::unordered_set<std::string> &visitedKeys)
@@ -215,7 +174,7 @@ std::vector<std::pair<std::string, std::string>> readData(std::string key, int d
     // se almacena en dos servidores de almacenamiento (index y nextIndex) (nextIndex = index + 1 || 0 if index = 3)
     int index = hashFunction(key[0]);
     int nextIndex = (index == STORAGE_INDEX_LIMIT) ? 0 : index + 1;
-
+    keepAlive(index, nextIndex);
     // CREAR MENSAJE PARA PEDIR DATOS AL SERVIDOR DE ALMACENAMIENTO
     std::string readMessage = rdtStorage.createRDTmessage("R" + complete_digits(key.size(), 4) + key);
 
@@ -266,7 +225,8 @@ std::vector<std::pair<std::string, std::string>> readData(std::string key, int d
     }
 
     // llamar recursivamente a la funcion para cada valor obtenido
-    for(int i = 0; i < tempValues.size(); i++){
+    for (int i = 0; i < tempValues.size(); i++)
+    {
         auto recursiveResult = readData(tempValues[i], depthSearch - 1, visitedKeys);
         result.insert(result.end(), recursiveResult.begin(), recursiveResult.end());
     }
@@ -284,39 +244,29 @@ void processMessage(int sockfd, std::string &message)
     {
         std::cout << "Create Command" << std::endl;
 
+        printStorageServers();
+
         std::string key;
         std::string value;
 
         // obtener (key, value)
         parseCreateMessage(message, key, value);
 
-        // CALCULAR INDICE DE SERVIDOR DE ALMACENAMIENTO (hash function)
-        // se almacena en dos servidores de almacenamiento (index y nextIndex) (nextIndex = index + 1 || 0 if index = 3)}
-
-        // TO DO: keep alive logic
-        /*
-        caso 1: ambos servidores de almacenamiento encendidos
-        servidor almacenamiento index encendido? -> almacenar datos
-        servidor almacenamiento nextIndex encendido? -> almacenar datos
-
-        caso 2: index apagado, nextIndex encendido
-        servidor almacenamiento index apagado? -> index = nextIndex, nextIndex = nextIndex + 1 || 0 if nextIndex = 3
-        verificar ambos servidores hasta que ambos esten encendidos
-
-        caso 3: index encendido, nextIndex apagado
-        servidor almacenamiento index encendido? -> almacenar datos
-        servidor almacenamiento nextIndex apagado? -> nextIndex = nextIndex + 1 || 0 if nextIndex = 3
-        verificar servidor nextIndex hasta que este encendido
-
-        caso 4: ambos servidores de almacenamiento apagados
-        index = nextIndex, nextIndex = nextIndex + 1 || 0 if nextIndex = 3
-        hasta que ambos servidores de almacenamiento esten encendidos
-        */
-
         int index = hashFunction(key[0]);
         int nextIndex = (index == STORAGE_INDEX_LIMIT) ? 0 : index + 1;
 
+        
         std::string storageMessage = rdtStorage.createRDTmessage(message);
+
+        std::cout << "index -> " << index << std::endl;
+        std::cout << "nextIndex -> " << nextIndex << std::endl;
+
+        // consultar estado de los servidores de almacenamiento
+        keepAlive(index, nextIndex);
+        std::cout << "DESPUES DE KEEP ALIVE" << std::endl;
+        std::cout << "index -> " << index << std::endl;
+        std::cout << "nextIndex -> " << nextIndex << std::endl;
+
 
         // almacenamiento en index y nextIndex
         sendAndProcessRDTMessage(index, storageMessage);
@@ -350,7 +300,7 @@ void processMessage(int sockfd, std::string &message)
         }
 
         std::cout << "REGISTROS TOTALES: " << result.size() << std::endl;
-        
+
         // EMPIEZA INTERACCION CON EL CLIENTE
         // Enviar numero de datos al cliente
         std::string message = "R" + complete_digits(result.size(), 4);
@@ -401,6 +351,8 @@ void processMessage(int sockfd, std::string &message)
         int index = hashFunction(key[0]);
         int nextIndex = (index == STORAGE_INDEX_LIMIT) ? 0 : index + 1;
 
+        keepAlive(index, nextIndex);
+
         std::string updateMessage = rdtStorage.createRDTmessage(message);
 
         sendAndProcessRDTMessage(index, updateMessage);
@@ -424,7 +376,7 @@ void processMessage(int sockfd, std::string &message)
         // TO DO: keep alive logic - similar a CREATE
         int index = hashFunction(key[0]);
         int nextIndex = (index == STORAGE_INDEX_LIMIT) ? 0 : index + 1;
-
+        keepAlive(index, nextIndex);
         std::string storageMessage = rdtStorage.createRDTmessage(message);
 
         sendAndProcessRDTMessage(index, storageMessage);
@@ -473,7 +425,7 @@ void processClientMessage(int sockfd, const sockaddr_in &clientAddr)
         {
             // mensaje correcto -> procesar mensaje - extraer mensaje para capa de aplicacion
             std::string message = rdtClient.decodeRDTmessage(RDTmessage);
-            //std::cout << "Message from client: " << message << std::endl;
+            // std::cout << "Message from client: " << message << std::endl;
             processMessage(sockfd, message);
         }
         else

@@ -17,7 +17,7 @@ void processServerResponse(int sockfd, sockaddr_in serverAddr)
     if (rdtMessage[0] == 'A')
     {
         std::cout << "ACK from Server" << std::endl;
-        //rdtStorage.sendACK(sockfd, serverAddr);
+        // rdtStorage.sendACK(sockfd, serverAddr);
     }
     else if (rdtMessage[0] == 'N')
     {
@@ -60,10 +60,10 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
         // obtener Key
         int keySize = std::stoi(message.substr(1, 4));
         std::string key = message.substr(5, keySize);
-        
-        // obtener valores conectados al Key 
+
+        // obtener valores conectados al Key
         std::vector<std::string> data = database.readData(key);
-        
+
         // enviar numero de valores al servidor principal
         /*
         message format:
@@ -72,12 +72,13 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
         */
         std::string message = "R" + complete_digits(data.size(), 4);
         std::string rdtMessage = rdtStorage.createRDTmessage(message);
-        
+
         rdtStorage.sendRDTmessage(sockfd, rdtMessage, mainServAddr);
         processServerResponse(sockfd, mainServAddr);
 
         // enviar valores al servidor principal
-        for(int i = 0; i < data.size(); i++){
+        for (int i = 0; i < data.size(); i++)
+        {
             std::cout << key << " - " << data[i] << std::endl;
             /*
             message format:
@@ -86,7 +87,7 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
             */
             string message = complete_digits(data[i].size(), 4) + data[i];
             std::string rdtMessage = rdtStorage.createRDTmessage(message);
-            
+
             // enviar al servidor principal
             rdtStorage.sendRDTmessage(sockfd, rdtMessage, mainServAddr);
             processServerResponse(sockfd, mainServAddr);
@@ -105,7 +106,7 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
 
         // obtener (key, oldValue, newValue)
         parseUpdateMessage(message, key, oldValue, newValue);
-        
+
         // actualizar (key, oldValue, newValue) en la base de datos
         database.updateData(key, oldValue, newValue);
         database.countData();
@@ -123,6 +124,11 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
         // eliminar (key, value) en la base de datos
         database.deleteData(key, value);
         database.countData();
+        break;
+    }
+    case 'K': // keep alive command
+    {
+        std::cout << "KEEP ALIVE" << std::endl;
         break;
     }
     default:
@@ -163,8 +169,8 @@ void processServerMessage(int sockfd, const sockaddr_in &mainServAddr)
         if (checkServerMessage(RDTmessage, sockfd, mainServAddr))
         {
             std::string message = rdtStorage.decodeRDTmessage(RDTmessage);
-            //std::cout << "Message from Main Server: " << message << std::endl;
-            // procesar mensaje
+            // std::cout << "Message from Main Server: " << message << std::endl;
+            //  procesar mensaje
             processMessage(message, sockfd, mainServAddr);
         }
         else
@@ -208,10 +214,7 @@ int main(int argc, char *argv[])
     sockaddr_in mainServAddr;
     socklen_t mainServAddrLen = sizeof(mainServAddr);
 
-    while (1)
-    {
-        processServerMessage(servidor2Socket, mainServAddr);
-    }
+    processServerMessage(servidor2Socket, mainServAddr);
 
     close(servidor2Socket);
 
