@@ -52,7 +52,7 @@ void printStorageServers()
 }
 
 // procesar respuesta del servidor de almacenamiento (solo en funciones CREATE, UPDATE, DELETE)
-void processStorageResponse(int sockfd, sockaddr_in serverAddr)
+void processStorageResponse(int sockfd, sockaddr_in serverAddr, std::string message)
 {
     // recibe ACK/NAK del servidor de almacenamiento
     std::string rdtMessage = rdtStorage.receiveACKmessage(sockfd, serverAddr);
@@ -65,7 +65,7 @@ void processStorageResponse(int sockfd, sockaddr_in serverAddr)
     else if (rdtMessage[0] == 'N')
     {
         std::cout << "NAK from Storage " << sockfd << std::endl;
-        // TO DO: logica de reenvio en caso de NAK
+        retransmition(message, sockfd, serverAddr);
     }
     else
     {
@@ -74,7 +74,7 @@ void processStorageResponse(int sockfd, sockaddr_in serverAddr)
 }
 
 // procesar respuesta del cliente (recibe ACK/NAK del cliente) (solo es funcion READ)
-void processClientResponse(int sockfd, sockaddr_in serverAddr)
+void processClientResponse(int sockfd, sockaddr_in serverAddr, std::string message)
 {
     std::string rdtMessage = rdtClient.receiveACKmessage(sockfd, serverAddr);
     // std::cout << "processClientResponse -> " << rdtMessage << std::endl;
@@ -85,7 +85,7 @@ void processClientResponse(int sockfd, sockaddr_in serverAddr)
     else if (rdtMessage[0] == 'N')
     {
         std::cout << "NAK from Client" << std::endl;
-        // TO DO: logica de reenvio al cliente en caso de NAK
+        retransmition(message, sockfd, serverAddr);
     }
     else
     {
@@ -98,6 +98,9 @@ bool checkStorageMessage(const std::string &receivedMessage, int sockfd, const s
 {
     uint32_t message_seq_num = rdtStorage.extractSeqNum(receivedMessage);
     uint32_t RDT_seq_num = rdtStorage.getSeqNum();
+
+        std::cout << "Message Seq Num: " << message_seq_num << std::endl;
+    std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
 
     if (rdtStorage.checkRDTmessage(receivedMessage) && (message_seq_num == RDT_seq_num))
     {
@@ -117,7 +120,7 @@ bool checkStorageMessage(const std::string &receivedMessage, int sockfd, const s
 void sendAndProcessRDTMessage(int index, const std::string &message)
 {
     rdtStorage.sendRDTmessage(storageServSockets[index].socket, message, storageServSockets[index].direccion);
-    processStorageResponse(storageServSockets[index].socket, storageServSockets[index].direccion);
+    processStorageResponse(storageServSockets[index].socket, storageServSockets[index].direccion, message);
 }
 
 bool isServerAvailable(int index)
@@ -175,6 +178,7 @@ std::vector<std::pair<std::string, std::string>> readData(std::string key, int d
     int index = hashFunction(key[0]);
     int nextIndex = (index == STORAGE_INDEX_LIMIT) ? 0 : index + 1;
     keepAlive(index, nextIndex);
+
     // CREAR MENSAJE PARA PEDIR DATOS AL SERVIDOR DE ALMACENAMIENTO
     std::string readMessage = rdtStorage.createRDTmessage("R" + complete_digits(key.size(), 4) + key);
 
@@ -255,18 +259,11 @@ void processMessage(int sockfd, std::string &message)
         int index = hashFunction(key[0]);
         int nextIndex = (index == STORAGE_INDEX_LIMIT) ? 0 : index + 1;
 
-        
-        std::string storageMessage = rdtStorage.createRDTmessage(message);
-
-        std::cout << "index -> " << index << std::endl;
-        std::cout << "nextIndex -> " << nextIndex << std::endl;
-
         // consultar estado de los servidores de almacenamiento
         keepAlive(index, nextIndex);
-        std::cout << "DESPUES DE KEEP ALIVE" << std::endl;
-        std::cout << "index -> " << index << std::endl;
-        std::cout << "nextIndex -> " << nextIndex << std::endl;
 
+        std::string storageMessage = rdtStorage.createRDTmessage(message);
+        //std::cout << "mensaje a enviar: " << storageMessage << std::endl;
 
         // almacenamiento en index y nextIndex
         sendAndProcessRDTMessage(index, storageMessage);
@@ -307,7 +304,7 @@ void processMessage(int sockfd, std::string &message)
         std::string rdtMessage = rdtStorage.createRDTmessage(message);
 
         rdtStorage.sendRDTmessage(sockfd, rdtMessage, clientAddr);
-        processClientResponse(sockfd, clientAddr);
+        processClientResponse(sockfd, clientAddr, rdtMessage);
 
         // Enviar registros al cliente
         for (auto &pair : result)
@@ -327,7 +324,7 @@ void processMessage(int sockfd, std::string &message)
             std::string rdtDataMessage = rdtStorage.createRDTmessage(dataMessage);
 
             rdtClient.sendRDTmessage(sockfd, rdtDataMessage, clientAddr);
-            processClientResponse(sockfd, clientAddr);
+            processClientResponse(sockfd, clientAddr, rdtDataMessage);
         }
 
         break;
@@ -377,6 +374,7 @@ void processMessage(int sockfd, std::string &message)
         int index = hashFunction(key[0]);
         int nextIndex = (index == STORAGE_INDEX_LIMIT) ? 0 : index + 1;
         keepAlive(index, nextIndex);
+
         std::string storageMessage = rdtStorage.createRDTmessage(message);
 
         sendAndProcessRDTMessage(index, storageMessage);
@@ -398,7 +396,10 @@ bool checkClientMessage(const std::string &receivedMessage, int sockfd, const so
     uint32_t message_seq_num = rdtClient.extractSeqNum(receivedMessage);
     uint32_t RDT_seq_num = rdtClient.getSeqNum();
 
-    if (rdtClient.checkRDTmessage(receivedMessage) && (message_seq_num == RDT_seq_num))
+    std::cout << "Message Seq Num: " << message_seq_num << std::endl;
+    std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
+
+    if (rdtClient.checkRDTmessage(receivedMessage) && (message_seq_num > RDT_seq_num))
     {
         std::cout << "Correct Message" << std::endl;
         rdtClient.sendACK(sockfd, clientAddr);
@@ -425,13 +426,13 @@ void processClientMessage(int sockfd, const sockaddr_in &clientAddr)
         {
             // mensaje correcto -> procesar mensaje - extraer mensaje para capa de aplicacion
             std::string message = rdtClient.decodeRDTmessage(RDTmessage);
-            // std::cout << "Message from client: " << message << std::endl;
+            std::cout << "Message from client: " << message << std::endl;
             processMessage(sockfd, message);
         }
         else
         {
-            // TODO: logica de reenvio en caso de NAK
-            // incorrect message -> SEND NAK TO CLIENT
+            // get retransmition
+            std::cout << "Incorrect Message" << std::endl;
         }
     }
 }
@@ -491,9 +492,9 @@ int main()
 
     std::cout << "Se crearon " << storageServSockets.size() << " servidores 2." << std::endl;
 
+
     while (true)
     {
-
         processClientMessage(mainSocketfd, clientAddr);
     }
 

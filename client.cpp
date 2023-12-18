@@ -11,10 +11,11 @@
 
 const int PORT = 12345;
 const int BUFFER_SIZE = 1024;
+const int MAX_ENTRIES = 3;
 RDT rdtClient;
 
 // revisar si respuesta del servidor principal es ACK o NAK
-void processServerResponse(int sockfd, sockaddr_in serverAddr)
+void processServerResponse(int sockfd, sockaddr_in serverAddr, std::string message)
 {
     std::string rdtMessage = rdtClient.receiveACKmessage(sockfd, serverAddr);
     std::cout << "RESPUESTA SERVIDOR PRINCIPAL -> " << rdtMessage << std::endl;
@@ -27,7 +28,7 @@ void processServerResponse(int sockfd, sockaddr_in serverAddr)
     else if (messageType == "NAK")
     {
         std::cout << "Received NAK from server." << std::endl;
-        // TO DO: logica de reenvio en caso de NAK
+        retransmition(message, sockfd, serverAddr);
     }
     else
     {
@@ -42,6 +43,10 @@ bool checkServerMessage(const std::string &receivedMessage, int sockfd, const so
     uint32_t message_seq_num = rdtClient.extractSeqNum(receivedMessage);
     // extraccion del numero de secuencia del rdt cliente
     uint32_t RDT_seq_num = rdtClient.getSeqNum();
+
+    std::cout << "Message Seq Num: " << message_seq_num << std::endl;
+    std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
+
 
     // comparar CHECKSUM y numero de secuencia
     if (rdtClient.checkRDTmessage(receivedMessage) && (message_seq_num == RDT_seq_num))
@@ -91,7 +96,7 @@ void createRegister(int sockfd, sockaddr_in serverAddr)
     rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
 
     // recibir respuesta del servidor principal (ACK o NAK)
-    processServerResponse(sockfd, serverAddr);
+    processServerResponse(sockfd, serverAddr, rdtMessage);
 }
 
 // leer registro (key, depthSearch)
@@ -114,7 +119,7 @@ void readRegister(int sockfd, sockaddr_in serverAddr)
     key            -> string key            (size key bytes)
     0000           -> size depthSearch      (4 bytes)
     depthSearch    -> string depthSearch    (size depthSearch bytes)
-    1 -> no recursivo 
+    1 -> no recursivo
     mayor a 1 -> recursivo
     */
 
@@ -132,8 +137,8 @@ void readRegister(int sockfd, sockaddr_in serverAddr)
     rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
 
     // recibir respuesta rdt del servidor principal (ACK o NAK)
-    processServerResponse(sockfd, serverAddr);
-    
+    processServerResponse(sockfd, serverAddr, rdtMessage);
+
     // primer mensaje recibido: tamaño de los datos a recibir
     std::string rdtSizeDataMessage = rdtClient.receiveRDTmessage(sockfd, serverAddr);
     int sizeData = 0;
@@ -150,7 +155,6 @@ void readRegister(int sockfd, sockaddr_in serverAddr)
         std::cout << "Error al recibir el tamaño de los datos" << std::endl;
         return;
     }
-
 
     std::cout << "---------REGISTROS---------" << std::endl;
     // RECIBIR REGISTROS DEL SERVIDOR PRINCIPAL
@@ -175,7 +179,6 @@ void readRegister(int sockfd, sockaddr_in serverAddr)
     }
 
     std::cout << "Numero de Registros: " << sizeData << std::endl;
-
 }
 
 // actualizar registro (key, oldValue, newValue)
@@ -193,7 +196,7 @@ void updateRegister(int sockfd, sockaddr_in serverAddr)
     std::cin >> oldValue;
     std::cout << "Enter new value: ";
     std::cin >> newValue;
-    
+
     /*
     UPDATE MESSAGE FORMAT
     U              -> type message    (1 byte)
@@ -221,7 +224,7 @@ void updateRegister(int sockfd, sockaddr_in serverAddr)
     rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
 
     // recibir respuesta del servidor principal (ACK o NAK)
-    processServerResponse(sockfd, serverAddr);
+    processServerResponse(sockfd, serverAddr, rdtMessage);
 }
 
 // eliminar registro (key, value)
@@ -260,7 +263,7 @@ void deleteRegister(int sockfd, sockaddr_in serverAddr)
     rdtClient.sendRDTmessage(sockfd, rdtMessage, serverAddr);
 
     // recibir respuesta del servidor principal (ACK o NAK)
-    processServerResponse(sockfd, serverAddr);
+    processServerResponse(sockfd, serverAddr, rdtMessage);
 }
 
 int main()
@@ -283,7 +286,6 @@ int main()
 
     while (true)
     {
-
         std::cout << "----- Menú CRUD -----" << std::endl;
         std::cout << "1. Crear registro" << std::endl;
         std::cout << "2. Leer registro" << std::endl;

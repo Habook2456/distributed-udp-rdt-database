@@ -91,6 +91,8 @@ public:
         std::string message = extractMessage(rdtMessage, messageSize);
         uint16_t checksum = extractChecksum(rdtMessage);
 
+        accSeq_num = seq_num;
+
         return message;
     }
 
@@ -129,7 +131,7 @@ public:
         std::string receivedMessage(buffer);
 
         // actualizar numero de secuencia acumulado
-        accSeq_num = extractSeqNum(receivedMessage);
+        // accSeq_num = extractSeqNum(receivedMessage);
 
         return receivedMessage;
     }
@@ -175,8 +177,6 @@ public:
         std::string nackMessage = "NAK" + complete_digits(accSeq_num, 10);
         sendRDTmessage(sockfd, nackMessage, destAddr);
     }
-
-
 };
 
 #endif

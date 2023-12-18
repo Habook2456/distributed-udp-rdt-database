@@ -10,7 +10,7 @@ RDT rdtStorage(1000);
 UDPdatabase database; // base de datos - abstraccion de grafo
 
 // procesar mensaje del servidor principal
-void processServerResponse(int sockfd, sockaddr_in serverAddr)
+void processServerResponse(int sockfd, sockaddr_in serverAddr, std::string message)
 {
     std::string rdtMessage = rdtStorage.receiveACKmessage(sockfd, serverAddr);
 
@@ -23,6 +23,7 @@ void processServerResponse(int sockfd, sockaddr_in serverAddr)
     {
         // TO DO: logica de reenvio en caso de NAK
         std::cout << "NAK from Server" << std::endl;
+        retransmition(message, sockfd, serverAddr);
     }
     else
     {
@@ -74,7 +75,7 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
         std::string rdtMessage = rdtStorage.createRDTmessage(message);
 
         rdtStorage.sendRDTmessage(sockfd, rdtMessage, mainServAddr);
-        processServerResponse(sockfd, mainServAddr);
+        processServerResponse(sockfd, mainServAddr, rdtMessage);
 
         // enviar valores al servidor principal
         for (int i = 0; i < data.size(); i++)
@@ -90,7 +91,7 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
 
             // enviar al servidor principal
             rdtStorage.sendRDTmessage(sockfd, rdtMessage, mainServAddr);
-            processServerResponse(sockfd, mainServAddr);
+            processServerResponse(sockfd, mainServAddr, rdtMessage);
         }
 
         database.countData();
@@ -130,7 +131,7 @@ void processMessage(std::string message, int sockfd, const sockaddr_in &mainServ
     {
         std::cout << "KEEP ALIVE" << std::endl;
         break;
-    }
+    }   
     default:
         break;
     }
@@ -142,7 +143,10 @@ bool checkServerMessage(const std::string &receivedMessage, int sockfd, const so
     uint32_t message_seq_num = rdtStorage.extractSeqNum(receivedMessage);
     uint32_t RDT_seq_num = rdtStorage.getSeqNum();
 
-    if (rdtStorage.checkRDTmessage(receivedMessage) && (message_seq_num == RDT_seq_num))
+    std::cout << "Message Seq Num: " << message_seq_num << std::endl;
+    std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
+
+    if (rdtStorage.checkRDTmessage(receivedMessage) && (message_seq_num > RDT_seq_num))
     {
         // std::cout << "Correct Message in storage (check)" << std::endl;
         //  std::string ackMessage = "ACK" + complete_digits(message_seq_num, 10);
