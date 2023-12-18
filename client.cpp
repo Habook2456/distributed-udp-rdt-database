@@ -14,6 +14,32 @@ const int BUFFER_SIZE = 1024;
 const int MAX_ENTRIES = 3;
 RDT rdtClient;
 
+void retransmition(std::string message, int sockfd, sockaddr_in serverAddr)
+{
+    int intentos = 0;
+    do{
+        std::cout << "Reenviando -> " << message << "\n";
+        rdtClient.sendRDTmessage(sockfd, message, serverAddr);
+
+        std::string response = rdtClient.receiveACKmessage(sockfd, serverAddr);
+
+        if(response.substr(0,3) == "ACK"){
+            std::cout << "ACK recibido. Datos entregados correctamente al servidor." << std::endl;
+            break;
+        } else if (response.substr(0,3) == "NAK"){
+            std::cout << "NAK recibido. Reintentando..." << std::endl;
+            intentos++;
+        } else{
+            std::cout << "Error en el mensaje recibido" << std::endl;
+        }
+
+    } while (intentos < MAX_ENTRIES);
+
+    if(intentos == MAX_ENTRIES){
+        std::cout << "Número máximo de reintentos alcanzado. No se pudo entregar el mensaje al servidor." << std::endl;
+    }
+}
+
 // revisar si respuesta del servidor principal es ACK o NAK
 void processServerResponse(int sockfd, sockaddr_in serverAddr, std::string message)
 {
@@ -44,12 +70,12 @@ bool checkServerMessage(const std::string &receivedMessage, int sockfd, const so
     // extraccion del numero de secuencia del rdt cliente
     uint32_t RDT_seq_num = rdtClient.getSeqNum();
 
-    std::cout << "Message Seq Num: " << message_seq_num << std::endl;
-    std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
+    //std::cout << "Message Seq Num: " << message_seq_num << std::endl;
+    //std::cout << "RDT Seq Num: " << RDT_seq_num << std::endl;
 
 
     // comparar CHECKSUM y numero de secuencia
-    if (rdtClient.checkRDTmessage(receivedMessage) && (message_seq_num == RDT_seq_num))
+    if (rdtClient.checkRDTmessage(receivedMessage) && (message_seq_num > RDT_seq_num))
     {
         rdtClient.sendACK(sockfd, mainServAddr);
         return true;

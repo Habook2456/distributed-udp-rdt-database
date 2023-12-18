@@ -31,31 +31,7 @@ uint16_t calculateChecksum(const std::string &data)
     return checksum;
 }
 
-void retransmition(std::string message, int sockfd, sockaddr_in serverAddr)
-{
-    int intentos = 0;
-    do{
-        std::cout << "Reenviando -> " << message << "\n";
-        rdtClient.sendRDTmessage(sockfd, message, serverAddr);
 
-        std::string response = rdtClient.receiveACKmessage(sockfd, serverAddr);
-
-        if(response.substr(0,3) == "ACK"){
-            std::cout << "ACK recibido. Datos entregados correctamente al servidor." << std::endl;
-            break;
-        } else if (response.substr(0,3) == "NAK"){
-            std::cout << "NAK recibido. Reintentando..." << std::endl;
-            intentos++;
-        } else{
-            std::cout << "Error en el mensaje recibido" << std::endl;
-        }
-
-    } while (intentos < MAX_ENTRIES);
-
-    if(intentos == MAX_ENTRIES){
-        std::cout << "Número máximo de reintentos alcanzado. No se pudo entregar el mensaje al servidor." << std::endl;
-    }
-}
 
 // parsear mensajes
 // CREATE

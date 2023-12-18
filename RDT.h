@@ -177,6 +177,10 @@ public:
         std::string nackMessage = "NAK" + complete_digits(accSeq_num, 10);
         sendRDTmessage(sockfd, nackMessage, destAddr);
     }
+
+    void reset(){
+        accSeq_num = 0;
+    }
 };
 
 #endif

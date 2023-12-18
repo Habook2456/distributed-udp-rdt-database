@@ -8,6 +8,33 @@
 
 RDT rdtStorage(1000);
 UDPdatabase database; // base de datos - abstraccion de grafo
+const int MAX_ENTRIES = 3;
+
+void retransmition(std::string message, int sockfd, sockaddr_in serverAddr)
+{
+    int intentos = 0;
+    do{
+        std::cout << "Reenviando -> " << message << "\n";
+        rdtStorage.sendRDTmessage(sockfd, message, serverAddr);
+
+        std::string response = rdtStorage.receiveACKmessage(sockfd, serverAddr);
+
+        if(response.substr(0,3) == "ACK"){
+            std::cout << "ACK recibido. Datos entregados correctamente al servidor." << std::endl;
+            break;
+        } else if (response.substr(0,3) == "NAK"){
+            std::cout << "NAK recibido. Reintentando..." << std::endl;
+            intentos++;
+        } else{
+            std::cout << "Error en el mensaje recibido" << std::endl;
+        }
+
+    } while (intentos < MAX_ENTRIES);
+
+    if(intentos == MAX_ENTRIES){
+        std::cout << "Número máximo de reintentos alcanzado. No se pudo entregar el mensaje al servidor." << std::endl;
+    }
+}
 
 // procesar mensaje del servidor principal
 void processServerResponse(int sockfd, sockaddr_in serverAddr, std::string message)
